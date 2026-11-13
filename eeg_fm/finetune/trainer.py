@@ -39,7 +39,7 @@ class Trainer(object):
         self.best_model_states = None
 
         warmup_epochs = getattr(params, 'warmup_epochs', 0)
-        head_lr = 0.001 * (params.batch_size / 256) ** 0.5
+        head_lr = getattr(params, 'head_lr', None) or 0.001 * (params.batch_size / 256) ** 0.5
         print(f"[trainer] backbone lr {params.lr:.3e} | head lr {head_lr:.3e}", flush=True)
 
         backbone_params, other_params = [], []
@@ -185,6 +185,13 @@ class Trainer(object):
                 self.best_model_states = copy.deepcopy(self.model.state_dict())
                 print(f"  * new best val {sel} {best:.5f}", flush=True)
             self._save_ckpt(epoch + 1, best, best_epoch, best_metrics)
+            if getattr(self.params, 'epoch_model_path', None):
+                # The model after every epoch, in the format of the selected model (--model_dir), so
+                # that other ways of choosing the epoch can be evaluated later without retraining.
+                path = self.params.epoch_model_path.format(epoch=epoch + 1)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                torch.save(dict(model=self.model.state_dict(), epoch=epoch + 1, val_metrics=mt,
+                                **getattr(self.params, 'epoch_model_meta', {})), path)
 
         self.model.load_state_dict(self.best_model_states)
         with torch.no_grad():

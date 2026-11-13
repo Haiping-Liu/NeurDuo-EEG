@@ -56,6 +56,15 @@ def main():
     ap.add_argument('--sched_stretch', type=int, default=1,
                     help='stretch warm-up and cosine k times beyond the training length; 4 gives '
                          'the learning-rate curve of the paper\'s CHB-MIT runs (see trainer.py)')
+    ap.add_argument('--readout', choices=['flatten', 'pool'], default='flatten',
+                    help='flatten: the shared readout (one weight per time step, channel and '
+                         'feature); pool: diagnostic, mean over the tokens of a unit')
+    ap.add_argument('--no_context_head', action='store_true',
+                    help='diagnostic for sequence tasks: classify each unit from its own readout, '
+                         'without the Mamba context head')
+    ap.add_argument('--head_lr', type=float, default=None,
+                    help='learning rate of everything outside the backbone '
+                         '(default: 1e-3 * sqrt(batch_size / 256))')
     ap.add_argument('--tag', default='', help='suffix for the result filename')
     ap.add_argument('--resume', action='store_true')
     ap.add_argument('--keep_ckpt', action='store_true',
@@ -63,6 +72,9 @@ def main():
     ap.add_argument('--model_dir', default=None,
                     help='if given, save the selected fine-tuned model (backbone, readout and '
                          'head) to <model_dir>/<fold|seed>.pt')
+    ap.add_argument('--save_all_epochs', action='store_true',
+                    help='sequence tasks: also save the model after every epoch to '
+                         '<model_dir>/epochs/, in the same format as the selected model')
     args = ap.parse_args()
 
     setup_seed(args.seed)
@@ -113,6 +125,7 @@ def main():
         seq_select_key=ds.get('seq_select_key', 'kappa'),
         grad_accum=args.grad_accum if seq else 1,
         sched_stretch=args.sched_stretch,
+        readout=args.readout, use_context_head=not args.no_context_head, head_lr=args.head_lr,
     )
 
     if seq:
@@ -123,6 +136,13 @@ def main():
     res_dir = os.path.join(args.output_dir, args.dataset)
     params.ckpt_path = os.path.join(res_dir, 'checkpoints', f'{stem}.pt')
     params.resume = args.resume
+    if seq and args.save_all_epochs:
+        if not args.model_dir:
+            ap.error('--save_all_epochs needs --model_dir')
+        params.epoch_model_path = os.path.join(args.model_dir, 'epochs',
+                                               stem + '_ep{epoch:02d}.pt')
+        params.epoch_model_meta = dict(model_config=dataclasses.asdict(model_config),
+                                       args=vars(args))
     print(f"[{args.dataset} {rep}] {params}", flush=True)
 
     loaders = LoadDataset(ds, batch_size=loader_bs, fold=args.fold,
@@ -146,7 +166,9 @@ def main():
                pretrained=not args.no_pretrained, readout_budget=ds['readout_budget'],
                warmup_epochs=args.warmup_epochs, epochs=epochs, batch_size=bs,
                windows_per_batch=loader_bs, grad_accum=params.grad_accum,
-               sched_stretch=args.sched_stretch,
+               sched_stretch=args.sched_stretch, readout=args.readout,
+               context_head=seq and params.context_len > 1 and not args.no_context_head,
+               head_lr=args.head_lr,
                n_params_backbone=int(n_bb), n_params_head=int(n_all - n_bb))
     if seq:
         res.update(context_len=params.context_len,

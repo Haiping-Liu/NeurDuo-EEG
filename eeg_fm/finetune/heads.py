@@ -1,4 +1,4 @@
-"""Shared readout head (STHead) and the causal Mamba context head of sequence tasks."""
+"""Shared readout head (STHead), a pooled diagnostic readout (PoolHead) and the causal Mamba context head of sequence tasks."""
 
 import torch.nn as nn
 
@@ -40,8 +40,41 @@ class STHead(nn.Module):
             h = m(h)
         return h
 
+    def classify(self, h):
+        return self.mlp[-1](h)
+
     def forward(self, tokens):
-        return self.mlp[-1](self.readout(tokens))
+        return self.classify(self.readout(tokens))
+
+
+class PoolHead(nn.Module):
+    def __init__(self, n_tokens, d_model, n_outputs, dropout=0.1, d_hidden=HIDDEN):
+        super().__init__()
+        self.n_tokens, self.d_model, self.n_outputs = n_tokens, d_model, n_outputs
+        self.norm = nn.LayerNorm(d_model)
+        self.mlp = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(d_model, d_hidden), nn.LeakyReLU(0.01), nn.Dropout(dropout),
+            nn.Linear(d_hidden, n_outputs),
+        )
+
+    def extra_repr(self):
+        return f"n_tokens={self.n_tokens}, d_model={self.d_model}, n_outputs={self.n_outputs}"
+
+    def readout(self, tokens):
+        b, n, d = tokens.shape
+        assert n == self.n_tokens and d == self.d_model, \
+            f"PoolHead expects (B,{self.n_tokens},{self.d_model}), got {tokens.shape}"
+        h = self.norm(tokens).mean(1)
+        for m in self.mlp[:-1]:
+            h = m(h)
+        return h
+
+    def classify(self, h):
+        return self.mlp[-1](h)
+
+    def forward(self, tokens):
+        return self.classify(self.readout(tokens))
 
 
 class StreamContextHead(nn.Module):

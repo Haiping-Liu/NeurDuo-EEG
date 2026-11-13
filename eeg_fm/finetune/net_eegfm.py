@@ -7,7 +7,7 @@ import torch.nn as nn
 from eeg_fm.config import EEGFMConfig
 from eeg_fm.data.normalize import normalize_sequence
 from eeg_fm.electrodes import coord_of, strip_reference
-from eeg_fm.finetune.heads import STHead
+from eeg_fm.finetune.heads import PoolHead, STHead
 from eeg_fm.model import EEGFM
 from eeg_fm.pretrain_config import PretrainConfig
 from eeg_fm.state import EEGMetadataBatch
@@ -87,8 +87,12 @@ class Model(nn.Module):
                                                 dtype=torch.long), persistent=False)
         self.register_buffer('_missing', torch.zeros(self.C), persistent=False)
 
-        self.classifier = STHead(self.n_tokens, self.d_model, params.num_of_classes,
-                                 params.dropout, budget=params.readout_budget)
+        if getattr(params, 'readout', 'flatten') == 'pool':
+            self.classifier = PoolHead(self.n_tokens, self.d_model, params.num_of_classes,
+                                       params.dropout)
+        else:
+            self.classifier = STHead(self.n_tokens, self.d_model, params.num_of_classes,
+                                     params.dropout, budget=params.readout_budget)
 
     def _metadata(self, batch_size, device):
         e = lambda t, *shape: t.unsqueeze(0).expand(batch_size, *shape)

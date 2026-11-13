@@ -11,15 +11,21 @@ class SeqModel(nn.Module):
         self.base = base
         self.st_head = base.classifier
         self.context_len = params.context_len
-        self.context = StreamContextHead(params.num_of_classes, params.context_len,
-                                         dropout=params.dropout)
+        # Without the context head each unit is classified from its own readout, so anything from
+        # earlier units has to come through the state the backbone carries.
+        self.context = (StreamContextHead(params.num_of_classes, params.context_len,
+                                          dropout=params.dropout)
+                        if getattr(params, 'use_context_head', True) else None)
 
     def encode(self, x):
         b, l = x.shape[:2]
         return self.st_head.readout(self.base.tokens_continuous(x)).view(b, l, -1)
 
     def forward(self, x, valid_mask=None):
-        return self.context(self.encode(x), valid_mask)
+        h = self.encode(x)
+        if self.context is None:
+            return self.st_head.classify(h)
+        return self.context(h, valid_mask)
 
 
 class SingleEpochModel(nn.Module):
