@@ -23,6 +23,7 @@ dist/
 /outputs/
 /logs/
 /results/
+/figure/chbmit_curves/
 /predictions/
 /checkpoints/
 /tensorboard/
